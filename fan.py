@@ -1,30 +1,38 @@
-import RPi.GPIO as GPIO
-import time
+import tkinter as tk
+from time import sleep
+import threading
+import math
 
-# Set up GPIO
-GPIO.setmode(GPIO.BCM)
-fan_gpio_pin = 18  
-GPIO.setup(fan_gpio_pin, GPIO.OUT)
+# Function to update the fan display in the Tkinter window
+def update_fan_display(canvas, angle):
+    canvas.delete("fan")
+    for i in range(4):
+        x0 = 50 + 30 * math.cos(math.radians(angle + 90 * i))
+        y0 = 50 + 30 * math.sin(math.radians(angle + 90 * i))
+        x1 = 50 + 30 * math.cos(math.radians(angle + 180 + 90 * i))
+        y1 = 50 + 30 * math.sin(math.radians(angle + 180 + 90 * i))
+        canvas.create_line(x0, y0, x1, y1, fill="black", tags="fan")
+    root.update()
 
-# Turn off the fan initially
-GPIO.output(fan_gpio_pin, GPIO.LOW)
-
-
-def turn_fan_on():
-    GPIO.output(fan_gpio_pin, GPIO.HIGH)
-
-
-def turn_fan_off():
-    GPIO.output(fan_gpio_pin, GPIO.LOW)
-
-
-try:
+# Function to simulate rotating a fan
+def rotate_fan():
+    angle = 0
     while True:
-        turn_fan_on()
-        time.sleep(5)  # Keep the fan on for 5 seconds
-        turn_fan_off()
-        time.sleep(5)  # Keep the fan off for 5 seconds
+        update_fan_display(canvas, angle)
+        angle = (angle + 10) % 360
+        sleep(0.1)
 
-except KeyboardInterrupt:
-    # Clean up when the program is terminated
-    GPIO.cleanup()
+# Set up the Tkinter window
+root = tk.Tk()
+root.title("Fan Rotation Simulator")
+canvas = tk.Canvas(root, height=100, width=100)
+canvas.pack()
+
+# Run the fan rotation function in a separate thread
+thread = threading.Thread(target=rotate_fan)
+thread.daemon = True  # Daemonize thread
+thread.start()
+
+# Start the Tkinter event loop
+root.mainloop()
+
