@@ -1,5 +1,3 @@
-Certainly, let's dive into more detail about the SCD4x sensor commands and CRC checksum:
-
 ## SCD4x Sensor Commands
 
 The SCD4x sensor communicates with other devices, like microcontrollers, using specific commands sent over the I2C communication protocol. Here are the key commands:
