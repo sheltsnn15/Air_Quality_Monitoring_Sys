@@ -1,68 +1,95 @@
-import time
-import logging
-import requests
+import time, logging, requests, os, pdb
 from sensirion_i2c_driver import LinuxI2cTransceiver, I2cConnection
 from sensirion_i2c_scd import Scd4xI2cDevice
+from influxdb_client import InfluxDBClient, Point
+from influxdb_client.client.write_api import SYNCHRONOUS
+
 
 # Configure Logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-
 DEVICE_ALTITUDE = 132
 API_KEY = 'eb1be9209cd5488680621512232008'
 LOCATION = 'Cork, Ireland'
 
+# InfluxDB configurations
+INFLUXDB_TOKEN = "H9kNV8v24yRDULrY3Fkc5hmuKl2S65AIKpCMJwDvPfYEocoeX76n90A4bNVxHBz2MI4QFE9URCvR4agIDIUP2g=="
+INFLUXDB_ORG = "Shelton"
+INFLUXDB_URL = "http://localhost:8086"  
+INFLUXDB_BUCKET = "IAQ_Monitoring_Sys"
 
-# Define a function to fetch atmospheric pressure using the weather API
-def get_atmospheric_pressure(api_key, location):
-    url = f'https://api.weatherapi.com/v1/current.json?key={api_key}&q={location}'
+class InfluxDBHandler:
+    def __init__(self):
+        self.client = InfluxDBClient(url=INFLUXDB_URL, token=INFLUXDB_TOKEN, org=INFLUXDB_ORG)
 
-    response = requests.get(url)
+    def write_to_influxdb(self, co2, temperature, humidity):
+        write_api = self.client.write_api(write_options=SYNCHRONOUS)
+        # pdb.set_trace()  # Set a breakpoint here
+        point = Point("sensor_data") \
+            .tag("location", LOCATION) \
+            .field("co2", co2.co2) \
+            .field("temperature", temperature.degrees_celsius) \
+            .field("humidity", humidity.percent_rh)
+        write_api.write(bucket=INFLUXDB_BUCKET, org=INFLUXDB_ORG, record=point)
 
-    if response.status_code == 200:
-        data = response.json()
-        atmospheric_pressure = data['current']['pressure_mb']
-        return atmospheric_pressure
-    else:
-        logger.error(f'Error: {response.status_code}')
-        return None
+class SensorHandler:
+    def __init__(self, i2c_transceiver):
+        self.scd4x = Scd4xI2cDevice(I2cConnection(i2c_transceiver))
+
+    def set_sensor_settings(self):
+        self.scd4x.stop_periodic_measurement()
+        self.scd4x.set_sensor_altitude(DEVICE_ALTITUDE)
+
+    def start_periodic_measurement(self):
+        self.scd4x.start_periodic_measurement()
+
+    def read_measurement(self):
+        return self.scd4x.read_measurement()
+
+class WeatherAPIHandler:
+    @staticmethod
+    def fetch_atmospheric_pressure(api_key, location):
+        url = f'https://api.weatherapi.com/v1/current.json?key={api_key}&q={location}'
+        response = requests.get(url)
+        response_data = response.json() if response.status_code == 200 else None        
+        # pdb.set_trace()  # Set a breakpoint here
+        return response_data.get('current', {}).get('pressure_mb', None)
+
+class MainApplication:
+    def __init__(self):
+        self.influxdb_handler = InfluxDBHandler()
+
+    def run(self):
+        try:
+            with LinuxI2cTransceiver('/dev/i2c-1') as i2c_transceiver:
+                sensor_handler = SensorHandler(i2c_transceiver)
+                # weather_handler = WeatherAPIHandler()
+
+                time.sleep(1)  # Ensure sensor is in idle state
+
+                sensor_handler.set_sensor_settings()
+
+                # est_ambient_pressure = weather_handler.fetch_atmospheric_pressure(API_KEY, LOCATION)
+                # if est_ambient_pressure is not None:
+                    # logger.info(f"Estimated Atmospheric Pressure in {LOCATION} mb: {est_ambient_pressure}")
+                    # sensor_handler.scd4x.set_ambient_pressure(int(est_ambient_pressure))  # Convert to Pa
+
+                sensor_handler.start_periodic_measurement()
+
+                while True:
+                    time.sleep(60)  # Sleep for 60 seconds (1 minute)
+                    
+                    co2, temperature, humidity = sensor_handler.read_measurement()
+                    logger.info(f"CO2: {co2}, Temperature: {temperature}, Humidity: {humidity}")
+
+                    # Write data to InfluxDB
+                    self.influxdb_handler.write_to_influxdb(co2, temperature, humidity)
 
 
-def main():
-    try:
-        with LinuxI2cTransceiver('/dev/i2c-1') as i2c_transceiver:
-            scd4x = Scd4xI2cDevice(I2cConnection(i2c_transceiver))
-
-            time.sleep(1)  # Ensure sensor is in idle state
-
-            scd4x.stop_periodic_measurement()  # Stop any ongoing measurement
-
-            logger.info("SCD41 Serial Number: {}".format(
-                scd4x.read_serial_number()))
-
-            scd4x.set_sensor_altitude(132)
-
-            est_ambient_pressure = int(
-                get_atmospheric_pressure(API_KEY, LOCATION))
-            if est_ambient_pressure is not None:
-                logger.info("Estimated Atmospheric Pressure in {} mb: {}".format(
-                    LOCATION, est_ambient_pressure))
-
-                # Set the estimated ambient pressure
-                scd4x.set_ambient_pressure(
-                    est_ambient_pressure)  # Convert to Pa
-
-            scd4x.start_periodic_measurement()
-
-            for _ in range(60):
-                time.sleep(5)
-                co2, temperature, humidity = scd4x.read_measurement()
-                logger.info("CO2: {}, Temperature: {}, Humidity: {}".format(
-                    co2, temperature, humidity))
-    except Exception as e:
-        logger.error("An error occured: {}".format(str(e)))
-
+        except Exception as e:
+            logger.error(f"An error occurred: {str(e)}")
 
 if __name__ == "__main__":
-    main()
+    app = MainApplication()
+    app.run()
