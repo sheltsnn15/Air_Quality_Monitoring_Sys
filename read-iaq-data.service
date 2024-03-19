@@ -1,0 +1,13 @@
+[Unit]
+Description=My Air Quality Monitoring System
+After=network.target
+
+[Service]
+User=thepinalyser
+Group=thepinalyser
+WorkingDirectory=/home/thepinalyser/Documents/Air_Quality_Monitoring_Sys
+Environment="PATH=/home/thepinalyser/.pyenv/shims:/home/thepinalyser/.pyenv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+ExecStart=/home/thepinalyser/.pyenv/versions/3.9.2/bin/python /home/thepinalyser/Documents/Air_Quality_Monitoring_Sys/start_script.py
+
+[Install]
+WantedBy=multi-user.target
