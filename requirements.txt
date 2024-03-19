@@ -1,0 +1,5 @@
+sensirion-i2c-driver
+sensirion-i2c-scd
+influxdb-client
+requests
+
