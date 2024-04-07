@@ -1,4 +1,5 @@
 import matplotlib.pyplot as plt
+import seaborn as sns
 import pandas as pd
 import plotly.graph_objs as go
 from plotly.subplots import make_subplots
@@ -143,7 +144,7 @@ def fit_time_series_model(time_series: pd.Series, seasonal_period: int) -> SARIM
             m=seasonal_period or 1,
             suppress_warnings=True,
             stepwise=False,
-            n_jobs=-1,
+            n_jobs=8,
         )
 
         # Check if seasonal order is not (0, 0, 0, 0) to determine whether to use SARIMAX or ARIMA
@@ -263,6 +264,47 @@ def plot_acf_pacf(series: pd.Series, title_prefix: str = ""):
     plt.show()
 
 
+def visualize_boxplots(
+    series: pd.Series, title: str = "Boxplot of Time Series Data", frequency: str = "H"
+):
+    """
+    Generate boxplots or scatter plots of the time series data for specified frequency: Hourly, Daily, Weekly, or Monthly.
+
+    Args:
+        series (pd.Series): Time series data with a datetime index.
+        title (str): Title for the plot.
+        frequency (str): Frequency for aggregating data. 'H' for hourly, 'D' for daily, 'W' for weekly, 'M' for monthly.
+    """
+    df_for_boxplot = series.copy().to_frame()
+    df_for_boxplot["Year"] = df_for_boxplot.index.year
+    df_for_boxplot["Month"] = df_for_boxplot.index.month
+    df_for_boxplot["Day"] = df_for_boxplot.index.day
+    df_for_boxplot["Hour"] = df_for_boxplot.index.hour
+    if frequency == "W":
+        df_for_boxplot["Week"] = df_for_boxplot.index.isocalendar().week
+
+    # Map frequency to plot data and labels
+    freq_to_label = {"M": "Month", "W": "Week", "D": "Day", "H": "Hour"}
+    x_label = freq_to_label.get(frequency, "Time")
+
+    plt.figure(figsize=(12, 6))
+    if frequency in ["D", "H"]:  # Use scatter plot for dense data points
+        sns.stripplot(
+            data=df_for_boxplot,
+            x=freq_to_label[frequency],
+            y=series.name,
+            jitter=0.25,
+            size=2.5,
+        )
+    else:  # Use boxplot for less dense data points
+        sns.boxplot(data=df_for_boxplot, x=freq_to_label[frequency], y=series.name)
+    plt.title(title)
+    plt.xlabel(x_label)
+    plt.xticks(rotation=45)  # Helps with readability, especially for large datasets
+    plt.grid(True)
+    plt.show()
+
+
 def visualize_data_analysis(series: pd.Series, title_prefix: str = ""):
     """
     Perform comprehensive data visualizations, including raw data plotting,
@@ -284,6 +326,32 @@ def visualize_data_analysis(series: pd.Series, title_prefix: str = ""):
 
     # Seasonal decomposition
     visualize_seasonal_decompose(series, title_prefix)
+
+
+def handle_outliers(series, method="cap"):
+    """
+    Handle outliers in a pandas Series using the Interquartile Range (IQR) method.
+
+    Args:
+        series (pd.Series): Time series data.
+        method (str): Method for handling outliers ('remove', 'cap', 'none').
+
+    Returns:
+        pd.Series: Series with handled outliers.
+    """
+    Q1 = series.quantile(0.25)
+    Q3 = series.quantile(0.75)
+    IQR = Q3 - Q1
+
+    lower_bound = Q1 - 1.5 * IQR
+    upper_bound = Q3 + 1.5 * IQR
+
+    if method == "cap":
+        return series.clip(lower=lower_bound, upper=upper_bound)
+    elif method == "remove":
+        return series[(series >= lower_bound) & (series <= upper_bound)]
+    else:
+        return series  # 'none' method, do not handle outliers
 
 
 def generate_forecast(
@@ -313,6 +381,40 @@ def generate_forecast(
     forecast_conf_int.index = forecast_index
 
     return forecast_mean, forecast_conf_int
+
+
+def save_forecast_to_csv(
+    forecast_mean: pd.Series,
+    forecast_conf_int: pd.DataFrame,
+    file_name: str = "forecast.csv",
+):
+    # Combine forecast mean and confidence intervals into a single DataFrame
+    forecast_df = pd.concat([forecast_mean, forecast_conf_int], axis=1)
+    forecast_df.columns = [
+        "Forecast",
+        "Confidence_Interval_Lower",
+        "Confidence_Interval_Upper",
+    ]
+
+    # Save the DataFrame to a CSV file
+    forecast_df.to_csv(file_name)
+    logger.info(f"Forecast saved to {file_name}")
+
+
+def save_evaluation_metrics(
+    mae: float, rmse: float, metrics_file: str = "evaluation_metrics.csv"
+):
+    # Create a DataFrame with the metrics
+    metrics_df = pd.DataFrame({"MAE": [mae], "RMSE": [rmse]})
+
+    # Check if the file exists to append or write
+    if os.path.exists(metrics_file):
+        with open(metrics_file, "a") as f:
+            metrics_df.to_csv(f, header=False, index=False)
+    else:
+        metrics_df.to_csv(metrics_file, index=False)
+
+    logger.info(f"Evaluation metrics saved to {metrics_file}")
 
 
 def plot_forecast_vs_actual(
@@ -427,12 +529,8 @@ def evaluate_forecast(
     return mae, rmse
 
 
-def main():
-    logging.basicConfig(level=logging.INFO)
-    logger = logging.getLogger(__name__)
-
+def main(logger, file_path):
     logger.info("Starting the forecasting process...")
-    file_path = "../data/raw_data/2024-03-06-11-22_co2_data.csv"
 
     # Load Data
     raw_data = load_data(file_path)
@@ -449,6 +547,11 @@ def main():
 
     # Preprocess Data
     cleaned_data = preprocess_data(raw_data, method="ffill")
+
+    # Handling Outliers
+    # cleaned_data["_value"] = handle_outliers(
+    #    cleaned_data["_value"], method="cap"
+    # )  # Adjust method as needed
 
     # User Interaction for Resampling and Analysis Period
     resample_frequency = input(
@@ -484,6 +587,14 @@ def main():
     # Resample Data to User-Specified Frequency
     new_resampled_data = resample_data(
         cleaned_data, resample_frequency=resample_frequency
+    )
+
+    visualize_boxplots(
+        new_resampled_data["_value"],  # Ensure "_value" is the correct column name
+        title="Distribution of Time Series Data - " + resample_frequency,
+        frequency=resample_frequency[
+            0
+        ],  # Assuming resample_frequency is correctly set to one of 'H', 'D', 'W', 'M'
     )
 
     # Select Training Period based on User Input
@@ -524,6 +635,10 @@ def main():
     mae, rmse = evaluate_forecast(actual_forecast_period_data, forecasted_values)
     logger.info(f"Forecast Evaluation - MAE: {mae}, RMSE: {rmse}")
 
+    # After forecasting and evaluation
+    save_forecast_to_csv(forecasted_values, forecast_confidence_interval)
+    save_evaluation_metrics(mae, rmse)
+
     # Fetch the extended actual data for visualization directly from new_resampled_data
     extended_actual_data = new_resampled_data.loc[
         training_start_date:forecast_end_date, "_value"
@@ -538,9 +653,20 @@ def main():
     )
 
     # Visualizations
-    visualize_data_analysis(extended_actual_data, "Hourly Training Data - ")
-    # plot_acf_pacf(forecasted_values - actual_data, "Hourly Forecast Residuals - ")
+    visualize_data_analysis(
+        extended_actual_data,
+        f"{resample_frequency[
+            0
+        ]} Training Data - ",
+    )
 
 
 if __name__ == "__main__":
-    main()
+    logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger(__name__)
+
+    co2_raw_data_file_path = "../data/raw_data/2024-03-06-11-22_co2_data.csv"
+    humidity_raw_data_file_path = "../data/raw_data/2024-03-06-11-26_humidity_data.csv"
+    temp_raw_data_file_path = "../data/raw_data/2024-03-06-11-28_temperature_data.csv"
+
+    main(logger, humidity_raw_data_file_path)
