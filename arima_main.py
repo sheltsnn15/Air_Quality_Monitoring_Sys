@@ -3,7 +3,12 @@ import pandas as pd
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 import logging
 
-from data_handling import load_data, preprocess_data, resample_data
+from data_handling import (
+    load_data,
+    preprocess_data,
+    resample_data,
+    get_maximum_weeks_available,
+)
 from time_series_modeling import (
     fit_time_series_model,
     generate_forecast,
@@ -17,6 +22,7 @@ from visualisation import (
     visualize_data_analysis,
     plot_forecast_vs_actual,
     visualize_boxplots,
+    plot_acf_pacf,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -24,92 +30,98 @@ logger = logging.getLogger(__name__)
 
 
 def evaluate_accuracy_over_training_sizes(
-    logger, file_path, start_weeks=1, end_weeks=10, step_weeks=1, forecast_horizon=24
+    logger, file_path, start_weeks=4, end_weeks=10, step_weeks=1, forecast_horizon=24
 ):
     """
     Evaluate the prediction accuracy of an ARIMA model over different training sizes.
-
-    This function iteratively increases the size of the training dataset, forecasts a fixed interval
-    ahead (e.g., 24 hours), and records the prediction accuracy for each training size.
-
     Args:
         logger: A logging.Logger object for logging messages.
         file_path: The path to the CSV file containing the time series data.
         start_weeks: The starting size of the training data in weeks.
-        end_weeks: The maximum size of the training data in weeks.
-        step_weeks: The step size to increase the training data by each iteration.
+        end_weeks: The maximum size of the training data in weeks, adjusted not to exceed dataset size.
+        step_weeks: The step size to increase the training data size for each iteration.
         forecast_horizon: The number of hours to forecast ahead from the end of each training period.
-
-    The function plots the relationship between training sizes (in weeks) and prediction accuracy.
     """
     accuracies = []
+    training_times = []  # List to store training times
     training_sizes = range(start_weeks, end_weeks + 1, step_weeks)
 
     raw_data = load_data(file_path)
     cleaned_data = preprocess_data(raw_data, method="ffill")
+    resampled_data = resample_data(cleaned_data, resample_frequency="D")
 
-    resample_frequency = "D"
-    new_resampled_data = resample_data(
-        cleaned_data, resample_frequency=resample_frequency
-    )
+    # Plot ACF and PACF for the entire series to understand data dependencies
+    plot_acf_pacf(
+        resampled_data["_value"], "Overall Data - "
+    )  # Assuming '_value' is the column name
+
+    # Ensure end_weeks does not exceed the dataset size
+    max_weeks = get_maximum_weeks_available(resampled_data)
+    if end_weeks > max_weeks:
+        logger.warning(
+            f"End weeks parameter exceeds the dataset size. Adjusting to {max_weeks} weeks."
+        )
+        end_weeks = max_weeks
 
     for weeks in training_sizes:
-        training_start_date = new_resampled_data.index.min()
+        training_start_date = resampled_data.index.min()
         training_end_date = training_start_date + pd.Timedelta(weeks=weeks)
 
-        forecast_start_date = training_end_date + pd.Timedelta(hours=1)
+        # Adjust the forecast start date to the next period
+        forecast_start_date = adjust_forecast_start_date(training_end_date)
         forecast_end_date = forecast_start_date + pd.Timedelta(
             hours=forecast_horizon - 1
         )
 
-        training_data = new_resampled_data.loc[
+        # Check if there's enough data for forecasting
+        if forecast_end_date > resampled_data.index.max():
+            logger.info(
+                f"Insufficient data for forecasting beyond {weeks} weeks of training. Stopping."
+            )
+            break
+
+        training_data = resampled_data.loc[
             training_start_date:training_end_date, "_value"
         ]
         stationary_data, _ = check_stationarity(training_data)
+        model_fit, training_time = fit_time_series_model(
+            stationary_data, seasonal_period=24
+        )  # Example seasonal period
 
-        model_fit = fit_time_series_model(stationary_data, seasonal_period=24)
+        training_times.append(training_time)  # Store the training time
 
         forecasted_values, _ = generate_forecast(
             model_fit, stationary_data, forecast_horizon, forecast_start_date
         )
-
-        # Align forecasted_values with actual data based on timestamps
-        forecasted_values.index = pd.date_range(
-            start=forecast_start_date, periods=len(forecasted_values), freq="D"
-        )
-
-        actual_forecast_data = new_resampled_data.loc[
+        actual_forecast_data = resampled_data.loc[
             forecast_start_date:forecast_end_date, "_value"
         ]
 
-        # Ensure both datasets are not empty and have overlapping periods
-        if (
-            not actual_forecast_data.empty
-            and not forecasted_values.empty
-            and actual_forecast_data.index.intersection(forecasted_values.index).any()
-        ):
-            common_index = forecasted_values.index.intersection(
-                actual_forecast_data.index
-            )
-            forecasted_values_aligned = forecasted_values.loc[common_index]
-            actual_forecast_data_aligned = actual_forecast_data.loc[common_index]
+        if len(forecasted_values) != len(actual_forecast_data):
+            forecasted_values = forecasted_values[: len(actual_forecast_data)]
 
-            accuracy = mean_absolute_error(
-                actual_forecast_data_aligned, forecasted_values_aligned
-            )
-            accuracies.append(accuracy)
-            logger.info(f"Weeks of training: {weeks}, Accuracy: {accuracy}")
-        else:
-            logger.warning(
-                f"Weeks of training: {weeks}, no overlapping data for forecast and actual data. Skipping accuracy calculation."
-            )
+        accuracy = mean_absolute_error(actual_forecast_data, forecasted_values)
+        accuracies.append(accuracy)
+        logger.info(f"Weeks of training: {weeks}, MAE: {accuracy:.4f}")
 
-    # Plot the results
-    plt.figure(figsize=(10, 6))
-    plt.plot(list(training_sizes), accuracies, marker="o", linestyle="-")
-    plt.xlabel("Weeks of Training Data")
-    plt.ylabel("Prediction Accuracy (MAE)")
-    plt.title("Prediction Accuracy vs. Training Size")
+    # Plotting results
+    fig, ax1 = plt.subplots(figsize=(10, 6))
+
+    color = "tab:red"
+    ax1.set_xlabel("Weeks of Training Data")
+    ax1.set_ylabel("Prediction Accuracy (MAE)", color=color)
+    ax1.plot(training_sizes, accuracies, marker="o", linestyle="-", color=color)
+    ax1.tick_params(axis="y", labelcolor=color)
+
+    ax2 = ax1.twinx()  # Instantiate a second axes that shares the same x-axis
+    color = "tab:blue"
+    ax2.set_ylabel(
+        "Training Time (seconds)", color=color
+    )  # We already handled the x-label with ax1
+    ax2.plot(training_sizes, training_times, marker="s", linestyle="--", color=color)
+    ax2.tick_params(axis="y", labelcolor=color)
+
+    plt.title("Prediction Accuracy and Training Time vs. Training Size")
     plt.grid(True)
     plt.show()
 
@@ -191,7 +203,7 @@ def main(logger, file_path):
     # Check Stationarity and Fit Model
     stationary_data, differencing_needed = check_stationarity(training_data)
     training_data_final = stationary_data if differencing_needed else training_data
-    model_fit = fit_time_series_model(training_data_final, seasonal_period)
+    model_fit, _ = fit_time_series_model(training_data_final, seasonal_period)
 
     # Forecast based on User-Specified Forecasting Steps
     forecasting_steps = int(
@@ -254,10 +266,5 @@ if __name__ == "__main__":
 
     # main(logger, humidity_raw_data_file_path)
     evaluate_accuracy_over_training_sizes(
-        logger=logger,
-        file_path=co2_raw_data_file_path,
-        start_weeks=4,  # Adjusting to start from 4 weeks, roughly a month
-        end_weeks=52,  # Example: extending to a year for comprehensive analysis
-        step_weeks=4,  # Incrementing in monthly intervals
-        forecast_horizon=24,  # Forecasting 24 hours ahead
+        logger=logger, file_path=co2_raw_data_file_path
     )

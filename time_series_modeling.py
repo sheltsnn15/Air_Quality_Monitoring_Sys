@@ -58,10 +58,8 @@ def fit_time_series_model(time_series: pd.Series, seasonal_period: int) -> SARIM
             # Fit ARIMA model
             model_fit = ARIMA(time_series, order=model.order).fit()
 
-        # Logging: Indicate the completion of model fitting process along with the time taken
-        logger.info(
-            f"Model fitting completed in {time.time() - start_time:.2f} seconds."
-        )
+        training_time = time.time() - start_time
+        logger.info(f"Model fitting completed in {training_time:.2f} seconds.")
 
         # Save the fitted model
         # dump(model_fit, "fitted_model.joblib")
@@ -70,7 +68,7 @@ def fit_time_series_model(time_series: pd.Series, seasonal_period: int) -> SARIM
         # Logging: Log error if model fitting fails
         logger.error(f"Model fitting failed: {e}")
         raise
-    return model_fit
+    return model_fit, training_time
 
 
 def generate_forecast(

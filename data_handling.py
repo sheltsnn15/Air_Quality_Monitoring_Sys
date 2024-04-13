@@ -110,7 +110,7 @@ def handle_outliers(series, method="cap"):
         return series  # 'none' method, do not handle outliers
 
 
-def get_maximum_weeks_available(data, start_date):
+def get_maximum_weeks_available(data):
     """
     Calculate the maximum number of weeks available in the dataset from the start_date.
 
@@ -121,6 +121,7 @@ def get_maximum_weeks_available(data, start_date):
     Returns:
         int: The maximum number of weeks available in the dataset from the start_date.
     """
+    start_date = data.index.min()  # Automatically use the earliest date in the dataset
     end_date = data.index.max()
     duration = end_date - start_date
     max_weeks = duration.days // 7  # Convert the duration to weeks
