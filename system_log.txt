@@ -1,0 +1,23 @@
+Running scheduled check of IAQ data...
+Loading and processing CO2 data...
+Running scheduled check of IAQ data...
+Loading and processing CO2 data...
+Latest CO2 value: 1413.0
+Fan state set to ON, MQTT Payload: {"state": "ON"}
+Scheduling next check in 300 seconds...
+Running scheduled check of IAQ data...
+
+Fan state set to ON, MQTT Payload: {"state": "ON"}
+Fan state set to ON, MQTT Payload: {"state": "ON"}
+Fan state set to ON, MQTT Payload: {"state": "ON"}
+Fan state set to ON, MQTT Payload: {"state": "ON"}
+Fan state set to ON, MQTT Payload: {"state": "ON"}
+Fan state set to ON, MQTT Payload: {"state": "ON"}
+Fan state set to ON, MQTT Payload: {"state": "ON"}
+Fan state set to ON, MQTT Payload: {"state": "ON"}
+Fan state set to ON, MQTT Payload: {"state": "ON"}
+Fan state set to ON, MQTT Payload: {"state": "ON"}
+Fan state set to ON, MQTT Payload: {"state": "ON"}
+Fan state set to ON, MQTT Payload: {"state": "ON"}
+Fan state set to ON, MQTT Payload: {"state": "ON"}
+Fan state set to ON, MQTT Payload: {"state": "ON"}

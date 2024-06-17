@@ -1,0 +1,9 @@
+matplotlib
+pandas
+pmdarima
+statsmodels
+numpy
+seaborn
+scikit-learn
+joblib
+plotly
